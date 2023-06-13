@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "glib.h": "c",
+        "gtrashstack.h": "c"
+    }
+}

@@ -1,17 +1,20 @@
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <glib.h>
 
 #define LINE_SIZE 5
 #define COLUMN_SIZE 5
 
+int MOUNT = 1;
+
 typedef struct {
     int line;
     int previousPid;
-    int previous[LINE_SIZE];
-    int current[LINE_SIZE];
-} XVet;
+    int nextPid;
+    int previousScore[LINE_SIZE];
+    int currentScore[LINE_SIZE];
+} SCORE;
 
 void PrintVet(int vet[], int size, int pid)
 {
@@ -25,41 +28,44 @@ void PrintVet(int vet[], int size, int pid)
 void RunMaster(int pid, int numProcesses, MPI_Datatype MyStructType)
 {
     int i, slaveId, buffer;
+    char direction;
+    int *processQueue = (int*) malloc(sizeof(int) * LINE_SIZE);
     printf("Master %d\n", pid);
 
-    // int **mat = InitializeMatrix(LINE_SIZE, LINE_SIZE);
-
-    // for (i=1; i < LINE_SIZE; i++)
-    // {
-    //     mat[i][0] = mat[i-1][0] - 1;
-    // }
-
-    // for (i=1; i < LINE_SIZE; i++)
-    // {
-    //     mat[0][i] = mat[0][i-1] -1;
-    // }
-
-    XVet data;
+    SCORE score;
 
     for (i=0; i < LINE_SIZE; i++)
     {
-        data.previous[i] = 0;
-        data.current[i] = 0;
+        score.previousScore[i] = 0;
     }
 
     for (i=1; i < LINE_SIZE; i++)
     {
-        data.previous[i] = data.previous[i-1] -1;
+        score.previousScore[i] = score.previousScore[i-1] -1;
     }
 
-    
+    processQueue[0] = 0;
     for (i=1, slaveId = 1; i <= LINE_SIZE; i++, slaveId++)
     {
         if(slaveId == numProcesses)
             slaveId = 1;
         
-        // slave are ready, send the line that will be processed by the process
-        MPI_Send(&i, 1, MPI_INT, slaveId, 0, MPI_COMM_WORLD);
+        score.line = i;
+        score.previousPid = processQueue[i-1];
+
+        if(i == LINE_SIZE)
+            score.nextPid = 0;
+        else
+            if(slaveId +1 == numProcesses)
+                score.nextPid = 1;
+            else
+                score.nextPid = slaveId +1;
+
+        MPI_Send(&score, 1, MyStructType, slaveId, 0, MPI_COMM_WORLD);
+
+        // Send the line that will be processed by the process
+        //MPI_Send(&i, 1, MPI_INT, slaveId, 0, MPI_COMM_WORLD);
+        processQueue[i] = slaveId;
     }
 
     // when the matrix lines finished we need to inform this to the slave process
@@ -67,48 +73,81 @@ void RunMaster(int pid, int numProcesses, MPI_Datatype MyStructType)
     for (slaveId = 1; slaveId < numProcesses; slaveId++)
     {
         // zero means the process will calculate the backtracing path
-        MPI_Send(&buffer, 1, MPI_INT, slaveId, 0, MPI_COMM_WORLD);
+        score.line = 0;
+        MPI_Send(&score, 1, MyStructType, slaveId, 0, MPI_COMM_WORLD);
+        //MPI_Send(&buffer, 1, MPI_INT, slaveId, 0, MPI_COMM_WORLD);
     }
 
-    //MPI_Send(&data, 1, MyStructType, slaveId, 0, MPI_COMM_WORLD);
+    // wait the last process send the start backtracing path
+    for (i = LINE_SIZE -1; i > 0; i--)
+    {
+        printf("Waiting process %d\n", processQueue[i]);
+        MPI_Recv(&direction, 1, MPI_INT, processQueue[i], 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        printf("Process %d receive direction %c\n", processQueue[i], direction);
+    }
+
+    free(processQueue);
 }
 
 void RunSlave(int pid, int numProcesses, MPI_Datatype MyStructType)
 {
-    int i, line, buffer;
+    int i, line, buffer, count, sendMount, receiveMount;
+    char direction;
+    SCORE score;
+    int *subScores = (int*) calloc(MOUNT, sizeof(int));
     //printf("Slave %d\n", pid);
 
-    // XVet receivedData;
+    // SCORE receivedData;
 
     // MPI_Recv(&receivedData, 1, MyStructType, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     // printf("%dReceived data:\n", pid);
     // printf("line: %d\n", receivedData.line);
-    // printf("previous pid: %d\n", receivedData.previousPid);
+    // printf("previousScore pid: %d\n", receivedData.previousPid);
 
-    // PrintVet(receivedData.previous, LINE_SIZE, pid);
+    // PrintVet(receivedData.previousScore, LINE_SIZE, pid);
 
     // printf("\n");
-    // PrintVet(receivedData.current, LINE_SIZE, pid);
-    // receivedData.current[receivedData.line] = receivedData.line * -1;
+    // PrintVet(receivedData.currentScore, LINE_SIZE, pid);
+    // receivedData.currentScore[receivedData.line] = receivedData.line * -1;
     // for(i=1; i<LINE_SIZE; i++)
     // {
-    //     printf(" %d|", receivedData.current[i]);
-    //     receivedData.current[i] = receivedData.previous[i-1] + receivedData.previous[i] + receivedData.current[i-1];
+    //     printf(" %d|", receivedData.currentScore[i]);
+    //     receivedData.currentScore[i] = receivedData.previousScore[i-1] + receivedData.previousScore[i] + receivedData.currentScore[i-1];
     // }
 
-    // PrintVet(receivedData.current, LINE_SIZE, pid);
+    // PrintVet(receivedData.currentScore, LINE_SIZE, pid);
     // printf("\n");
     // MPI_Send(&receivedData, 1, MyStructType, 0, 0, MPI_COMM_WORLD);
 
-    do
+    MPI_Recv(&score, 1, MyStructType, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    while (score.line)
     {
-        MPI_Recv(&line, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        if(line > 0)
+        score.currentScore[0] = score.line * -1;
+
+        for(i=1, count=0; i<COLUMN_SIZE; i++, count++)
         {
-            printf("P:%d L:%d\n", pid, line);
+            score.currentScore[i] = score.previousScore[i-1] + score.previousScore[i] + score.currentScore[i-1];
+            count++;
+
+            if(count == MOUNT)
+            {
+                if(score.nextPid)
+                {
+                    MPI_Send(&score.currentScore[i-count], MOUNT, MPI_INT, score.nextPid, 0, MPI_COMM_WORLD);
+                }
+         
+                MPI_Recv(&score.previousScore[i+1], MOUNT, MPI_INT, score.previousPid, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);  
+                count = 0;
+            }
         }
-    } while (line > 0);
+
+        MPI_Recv(&score, 1, MyStructType, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        printf("P:%d L:%d\n", pid, line);
+    }
+    direction = 'D';
+    MPI_Send(&direction, 1, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
     
 }
 
@@ -131,15 +170,15 @@ int main(int argc, char** argv) {
 
 
     // Definindo o tipo de dados derivado
-    XVet xvet;
+    SCORE xvet;
     MPI_Datatype MyStructType;
     MPI_Datatype types[4] = { MPI_INT, MPI_INT, MPI_INT, MPI_INT};
     int blocklengths[4] = { 1, 1, LINE_SIZE, LINE_SIZE };
     MPI_Aint offsets[4];
     MPI_Get_address(&xvet.line, &offsets[0]);
     MPI_Get_address(&xvet.previousPid, &offsets[1]);
-    MPI_Get_address(&xvet.previous, &offsets[2]);
-    MPI_Get_address(&xvet.current, &offsets[3]);
+    MPI_Get_address(&xvet.previousScore, &offsets[2]);
+    MPI_Get_address(&xvet.currentScore, &offsets[3]);
     offsets[1] -= offsets[0];
     offsets[2] -= offsets[0];
     offsets[3] -= offsets[0];
